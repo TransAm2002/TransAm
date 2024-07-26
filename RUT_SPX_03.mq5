@@ -1,24 +1,24 @@
 //+------------------------------------------------------------------+
-//| RUT_SPX.mq5                                                      |
-//| Expert Advisor for S&P500 and Russell 2000                       |
-//| by [Your Name]                                                   |
+//|                                                  RUT_SPX.mq5     |
+//|           Expert Advisor for S&P500 and Russell 2000             |
+//|                         by [Your Name]                           |
 //+------------------------------------------------------------------+
 #property strict
-
 #include <Trade\Trade.mqh>
+
 CTrade Trade;
 
 //--- input parameters
-input double risk_per_trade = 0.01; // Risk per trade as a percentage of account balance
+input double risk_per_trade = 0.1; // Risk per trade as a percentage of account balance
 input double fixed_lot_size = 0.1; // Fixed lot size for testing purposes
 input bool use_fixed_lot_size = true; // Whether to use fixed lot size or dynamic lot size
 input int max_positions = 5; // Maximum number of open positions
-input int entry_threshold = 1; // Entry threshold for price difference
-input int exit_threshold = 0.5; // Exit threshold for price difference
+input int entry_threshold = 2; // Entry threshold for price difference
+input double exit_threshold = 0.5; // Exit threshold for price difference
 input int period = 20; // Period for regression and correlation
 input int volatility_period = 14; // Period for volatility calculation
-input double volatility_multiplier = 2.0; // Multiplier for volatility threshold
-input int magic_number = 123456; // Magic number for the EA
+input double volatility_multiplier = 1.1; // Multiplier for volatility threshold
+input long magic_number = 123456; // Magic number for the EA
 input bool debug_mode = true; // Enable or disable debug mode
 
 //--- global variables
@@ -29,8 +29,8 @@ double price_diffs[];
 double volatility;
 
 //--- trade objects
-MqlTradeRequest request;
-MqlTradeResult result;
+MqlTradeRequest trade_request;
+MqlTradeResult trade_result;
 MqlTradeTransaction transaction;
 
 int OnInit()
@@ -79,8 +79,8 @@ void OnTick()
             double calculated_lot_size = CalculatePositionSize(stop_loss_pips);
 
             //--- entry logic for long position on SPX and short position on RUT
-            EnterLong("SPX500", calculated_lot_size);
-            EnterShort("RUSSELL2000", calculated_lot_size);
+            EnterLong("US500Cash", calculated_lot_size);
+            EnterShort("US2000Cash", calculated_lot_size);
         }
     }
     else if (price_diffs[0] < lower_threshold)
@@ -93,8 +93,8 @@ void OnTick()
             double calculated_lot_size = CalculatePositionSize(stop_loss_pips);
 
             //--- entry logic for short position on SPX and long position on RUT
-            EnterShort("SPX500", calculated_lot_size);
-            EnterLong("RUSSELL2000", calculated_lot_size);
+            EnterShort("US500Cash", calculated_lot_size);
+            EnterLong("US2000Cash", calculated_lot_size);
         }
     }
 
@@ -121,11 +121,13 @@ void OnTick()
 void UpdatePrices()
 {
     //--- update prices arrays
-    double spx_price = iClose("SPX500", PERIOD_M1, 0);
-    double rut_price = iClose("RUSSELL2000", PERIOD_M1, 0);
+    double spx_price = iClose("US500Cash", PERIOD_M1, 0);
+    double rut_price = iClose("US2000Cash", PERIOD_M1, 0);
+
     ArrayResize(spx_prices, ArraySize(spx_prices) + 1);
     ArrayResize(rut_prices, ArraySize(rut_prices) + 1);
     ArrayResize(price_diffs, ArraySize(price_diffs) + 1);
+
     spx_prices[0] = spx_price;
     rut_prices[0] = rut_price;
     price_diffs[0] = spx_price - rut_price;
@@ -153,39 +155,46 @@ int CountOpenPositions()
 //+------------------------------------------------------------------+
 //| Custom function to calculate volatility                          |
 //+------------------------------------------------------------------+
-double CalculateVolatility(double &price_diffs[], int period)
+double CalculateVolatility(double &local_price_diffs[], int local_period)
 {
     double sum = 0.0;
     double mean = 0.0;
     double variance = 0.0;
-    for (int i = 0; i < period; i++)
-        sum += price_diffs[i];
-    mean = sum / period;
-    for (int i = 0; i < period; i++)
-        variance += MathPow(price_diffs[i] - mean, 2);
-    variance /= period;
+
+    for (int i = 0; i < local_period; i++)
+        sum += local_price_diffs[i];
+
+    mean = sum / local_period;
+
+    for (int i = 0; i < local_period; i++)
+        variance += MathPow(local_price_diffs[i] - mean, 2);
+
+    variance /= local_period;
     return MathSqrt(variance);
 }
 
 //+------------------------------------------------------------------+
 //| Custom function to calculate regression coefficient              |
 //+------------------------------------------------------------------+
-double RegressionCoefficient(double &x[], double &y[], int period)
+double RegressionCoefficient(double &x[], double &y[], int local_period)
 {
     double sumX = 0.0;
     double sumY = 0.0;
     double sumXY = 0.0;
     double sumX2 = 0.0;
-    double n = period;
-    for (int i = 0; i < period; i++)
+    double n = local_period;
+
+    for (int i = 0; i < local_period; i++)
     {
         sumX += x[i];
         sumY += y[i];
         sumXY += x[i] * y[i];
         sumX2 += x[i] * x[i];
     }
+
     double numerator = n * sumXY - sumX * sumY;
     double denominator = n * sumX2 - sumX * sumX;
+
     if (denominator != 0)
         return numerator / denominator;
     return 0.0;
@@ -194,15 +203,16 @@ double RegressionCoefficient(double &x[], double &y[], int period)
 //+------------------------------------------------------------------+
 //| Custom function to calculate correlation coefficient             |
 //+------------------------------------------------------------------+
-double CorrelationCoefficient(double &x[], double &y[], int period)
+double CorrelationCoefficient(double &x[], double &y[], int local_period)
 {
     double sumX = 0.0;
     double sumY = 0.0;
     double sumXY = 0.0;
     double sumX2 = 0.0;
     double sumY2 = 0.0;
-    double n = period;
-    for (int i = 0; i < period; i++)
+    double n = local_period;
+
+    for (int i = 0; i < local_period; i++)
     {
         sumX += x[i];
         sumY += y[i];
@@ -210,8 +220,10 @@ double CorrelationCoefficient(double &x[], double &y[], int period)
         sumX2 += x[i] * x[i];
         sumY2 += y[i] * y[i];
     }
+
     double numerator = n * sumXY - sumX * sumY;
     double denominator = sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+
     if (denominator != 0)
         return numerator / denominator;
     return 0.0;
@@ -224,6 +236,7 @@ double CalculatePositionSize(double stop_loss_pips)
 {
     double account_balance = AccountInfoDouble(ACCOUNT_BALANCE);
     double lot_size = 0.0;
+
     if (use_fixed_lot_size)
         lot_size = fixed_lot_size;
     else
@@ -239,6 +252,7 @@ double CalculatePositionSize(double stop_loss_pips)
     double lot_step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
     lot_size = MathMax(min_lot, MathMin(lot_size, max_lot));
     lot_size = MathFloor(lot_size / lot_step) * lot_step;
+
     return lot_size;
 }
 
@@ -249,21 +263,23 @@ void EnterLong(string symbol, double lot_size)
 {
     if (debug_mode)
         Print("Entering long position for ", symbol, " with lot size ", lot_size);
-    request.action = TRADE_ACTION_DEAL;
-    request.symbol = symbol;
-    request.volume = lot_size;
-    request.type = ORDER_TYPE_BUY;
-    request.type_filling = ORDER_FILLING_IOC;
-    request.price = SymbolInfoDouble(symbol, SYMBOL_BID);
-    request.sl = 0;
-    request.tp = 0;
-    request.deviation = 10;
-    request.magic = magic_number;
-    request.comment = "RUT_SPX Long Entry";
 
-    if (!OrderSend(request, result))
+    trade_request.action = TRADE_ACTION_DEAL;
+    trade_request.symbol = symbol;
+    trade_request.volume = lot_size;
+    trade_request.type = ORDER_TYPE_BUY;
+    trade_request.type_filling = ORDER_FILLING_IOC;
+    trade_request.price = SymbolInfoDouble(symbol, SYMBOL_BID);
+    trade_request.sl = 0;
+    trade_request.tp = 0;
+    trade_request.deviation = 10;
+    trade_request.magic = magic_number;
+    trade_request.comment = "RUT_SPX Long Entry";
+
+    MqlTradeResult local_result;
+    if (!OrderSend(trade_request, local_result))
         if (debug_mode)
-            Print("Error opening long position: ", result.retcode);
+            Print("Error opening long position: ", local_result.retcode);
 }
 
 //+------------------------------------------------------------------+
@@ -273,21 +289,23 @@ void EnterShort(string symbol, double lot_size)
 {
     if (debug_mode)
         Print("Entering short position for ", symbol, " with lot size ", lot_size);
-    request.action = TRADE_ACTION_DEAL;
-    request.symbol = symbol;
-    request.volume = lot_size;
-    request.type = ORDER_TYPE_SELL;
-    request.type_filling = ORDER_FILLING_IOC;
-    request.price = SymbolInfoDouble(symbol, SYMBOL_ASK);
-    request.sl = 0;
-    request.tp = 0;
-    request.deviation = 10;
-    request.magic = magic_number;
-    request.comment = "RUT_SPX Short Entry";
 
-    if (!OrderSend(request, result))
+    trade_request.action = TRADE_ACTION_DEAL;
+    trade_request.symbol = symbol;
+    trade_request.volume = lot_size;
+    trade_request.type = ORDER_TYPE_SELL;
+    trade_request.type_filling = ORDER_FILLING_IOC;
+    trade_request.price = SymbolInfoDouble(symbol, SYMBOL_ASK);
+    trade_request.sl = 0;
+    trade_request.tp = 0;
+    trade_request.deviation = 10;
+    trade_request.magic = magic_number;
+    trade_request.comment = "RUT_SPX Short Entry";
+
+    MqlTradeResult local_result;
+    if (!OrderSend(trade_request, local_result))
         if (debug_mode)
-            Print("Error opening short position: ", result.retcode);
+            Print("Error opening short position: ", local_result.retcode);
 }
 
 //+------------------------------------------------------------------+
@@ -329,6 +347,7 @@ void CheckAccountEquity()
 {
     double equity = AccountInfoDouble(ACCOUNT_EQUITY);
     double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+
     if (equity < balance * 0.5)
     {
         ExitAllPositions();
@@ -339,8 +358,8 @@ void CheckAccountEquity()
 //+------------------------------------------------------------------+
 //| Custom function for testing and optimization                     |
 //+------------------------------------------------------------------+
-int OnTester()
+double OnTester()
 {
     // Custom optimization criteria can be implemented here
-    return 0;
+    return 0.0;
 }
